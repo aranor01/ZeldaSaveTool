@@ -6,12 +6,26 @@ internal class SaveFile
 {
 	private const int MaxSize = 0x8000; // Default save file size.
 	private const int MinSize = 0x7A00; // Used in Open Ocarina.
+    private const int GameCubeFormatMinSize = 0x6044 + 0x8000; // Minimum expected size of a dolphin savefile.
 
-	public static bool Validate(string filePath)
+    public static bool Validate(string filePath)
 	{
 		if (!Io.ValidateFile(filePath)) return false;
 
-		switch (new FileInfo(filePath).Length)
+		var fileLength = new FileInfo(filePath).Length;
+
+
+        if (IsGameCubeFormat(filePath))
+		{
+			if (fileLength < GameCubeFormatMinSize)
+			{
+                Message.New(Message.Level.E, _("Wrong_Size"));
+                return false;
+			}
+			return true;
+		}
+
+		switch (fileLength)
 		{
 			case MaxSize:
 				return true;
@@ -24,11 +38,43 @@ internal class SaveFile
 				Message.New(Message.Level.E, _("Wrong_Size"));
 				return false;
 		}
+    }
+
+	public static bool IsGameCubeFormat(string filePath)
+	{
+		return ".gci".Equals(Path.GetExtension(filePath), StringComparison.InvariantCultureIgnoreCase);
 	}
 
-	public static byte[] ToPcPortSave(string filePath)
+    public static byte[] ToPcPortSave(string filePath)
 	{
-		var saveData = Convert.ToBigEndian(Io.GetDataBytes(filePath));
+		if (IsGameCubeFormat(filePath))
+		{
+			var stream = new FileStream(filePath, FileMode.Open);
+            var reader = new BinaryReader(stream);
+			stream.Seek(0x6044, SeekOrigin.Begin);
+            
+			var inputData = new byte[MaxSize];
+			int offset = 0x20;
+			reader.Read(inputData, 0, 0x20);
+
+			var tailToSKip = new int[] { 0, 0x4, 0x0 };
+			for (int i = 0; i < 3; ++i)
+			{
+				reader.Read(inputData, offset, 0x1450);
+				offset += 0x1450;
+				stream.Seek(tailToSKip[i], SeekOrigin.Current);
+			}
+
+			return ToPcPortSave(inputData);
+			
+            //return ToPcPortSave(reader.ReadBytes(MaxSize));
+        }
+        return ToPcPortSave(Io.GetDataBytes(filePath));
+    }
+
+    public static byte[] ToPcPortSave(byte[] inputData)
+	{
+        var saveData = Convert.ToBigEndian(inputData);
 
 		saveData = FixPlayerName(saveData, 0x0044);
 		saveData = FixPlayerName(saveData, 0x1494);
